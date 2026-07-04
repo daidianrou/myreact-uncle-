@@ -46,6 +46,30 @@ function loadStation() {
       closingQueue: parsed.closingQueue || [...DEFAULT_CLOSING, ...BUILTIN_TRACKS],
     };
   } catch {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw && raw.length > 0) {
+        const trimmed = raw.trim();
+        if (trimmed.endsWith('}')) {
+          const lastOpenBrace = trimmed.lastIndexOf('{');
+          if (lastOpenBrace !== -1) {
+            const partial = trimmed.substring(0, lastOpenBrace + 1);
+            try {
+              const parsed = JSON.parse(partial);
+              return {
+                isLive: false,
+                currentIndex: -1,
+                volume: 0.65,
+                adminUrl: '',
+                ...parsed,
+                queue: parsed.queue || [...DEFAULT_EXTERNAL, ...BUILTIN_TRACKS],
+                closingQueue: parsed.closingQueue || [...DEFAULT_CLOSING, ...BUILTIN_TRACKS],
+              };
+            } catch {}
+          }
+        }
+      }
+    } catch {}
     return {
       isLive: false,
       currentIndex: -1,
@@ -319,18 +343,38 @@ function RadioPanel({ isDark, isAdmin, onClose }) {
   }, [station]);
 
   useEffect(() => {
-    const t = setInterval(() => {
-      if (saveFailedRef.current) return;
-      const s = loadStation();
-      setStation(prev => ({
-        ...prev,
-        queue: s.queue,
-        closingQueue: s.closingQueue,
-        volume: s.volume,
-        adminUrl: s.adminUrl,
-      }));
-    }, 4000);
-    return () => clearInterval(t);
+    const handleStorageChange = (e) => {
+      if (e.key !== STORAGE_KEY) return;
+      try {
+        const s = loadStation();
+        if (s.queue && s.queue.length > 0) {
+          setStation(prev => {
+            const prevQueue = prev.queue || [];
+            const newQueue = s.queue || [];
+            
+            const prevHasLocal = prevQueue.some(item => item.isLocal || (item.url && item.url.startsWith('data:')));
+            const newHasLocal = newQueue.some(item => item.isLocal || (item.url && item.url.startsWith('data:')));
+            
+            if (prevHasLocal && !newHasLocal) {
+              return prev;
+            }
+            
+            return {
+              ...prev,
+              queue: newQueue,
+              closingQueue: s.closingQueue,
+              volume: s.volume,
+              adminUrl: s.adminUrl,
+            };
+          });
+        }
+      } catch {
+        console.warn('Failed to load station from storage');
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const stopAll = useCallback(() => {
@@ -564,9 +608,9 @@ function RadioPanel({ isDark, isAdmin, onClose }) {
     }
 
     // 检查文件大小（Base64 编码后约为原文件 1.37 倍，localStorage 通常限制 5-10MB）
-    const maxSize = 3 * 1024 * 1024; // 3MB 限制，留出 localStorage 其他数据的空间
+    const maxSize = 8 * 1024 * 1024; // 8MB 限制，留出 localStorage 其他数据的空间
     if (file.size > maxSize) {
-      setError(`音频文件过大（${(file.size / 1024 / 1024).toFixed(1)}MB），localStorage 无法存储。请使用小于 3MB 的音频文件，或粘贴在线音乐链接。`);
+      setError(`音频文件过大（${(file.size / 1024 / 1024).toFixed(1)}MB），建议使用小于 8MB 的音频文件，或粘贴在线音乐链接。`);
       e.target.value = '';
       return;
     }
