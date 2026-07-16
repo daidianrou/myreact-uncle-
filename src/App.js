@@ -10,26 +10,13 @@ import UserManagement from './components/UserManagement';
 import Settings from './components/Settings';
 import Login from './components/Login';
 import Register from './components/Register';
-import FaceVerify from './components/FaceVerify';
 import Minesweeper from './components/Minesweeper';
 import RadioPlayer, { RadioMiniBar } from './components/RadioPlayer';
-import AdminFaceManager from './components/AdminFaceManager';
-
-const ADMIN_FACES_KEY = 'admin_faces';
-
-function loadAdminFaces() {
-  try {
-    const raw = localStorage.getItem(ADMIN_FACES_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
 
 const defaultUsers = [
-  { id: 1, name: '张三', email: 'zhangsan@example.com', phone: '13800138001', status: 'active', password: '123456', role: 'user', remark: 'VIP' },
-  { id: 2, name: '李四', email: 'lisi@example.com', phone: '13800138002', status: 'active', password: '123456', role: 'user', remark: '勤奋用户' },
-  { id: 3, name: '王五', email: 'wangwu@example.com', phone: '13800138003', status: 'inactive', password: '123456', role: 'user', remark: '' },
+  { id: 1, name: '张三', email: 'zhangsan@example.com', phone: '13800138001', status: 'active', password: '123456', role: 'user', remark: 'VIP', cardType: 'year', cardStartDate: new Date().toISOString().split('T')[0], cardExpire: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], fixedRoomId: 1, fixedSeatId: 5, handledBy: '', amountReceived: '' },
+  { id: 2, name: '李四', email: 'lisi@example.com', phone: '13800138002', status: 'active', password: '123456', role: 'user', remark: '勤奋用户', cardType: 'month', cardStartDate: new Date().toISOString().split('T')[0], cardExpire: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], fixedRoomId: null, fixedSeatId: null, handledBy: '', amountReceived: '' },
+  { id: 3, name: '王五', email: 'wangwu@example.com', phone: '13800138003', status: 'inactive', password: '123456', role: 'user', remark: '', cardType: null, cardStartDate: null, cardExpire: null, fixedRoomId: null, fixedSeatId: null, handledBy: '', amountReceived: '' },
 ];
 
 const defaultRooms = [
@@ -63,9 +50,6 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [showRegister, setShowRegister] = useState(false);
-  const [showFaceVerify, setShowFaceVerify] = useState(false);
-  const [pendingLoginUser, setPendingLoginUser] = useState(null);
-  const [pendingLoginFaceData, setPendingLoginFaceData] = useState(null);
   const [users, setUsers] = useRealtimeSync(STORAGE_KEYS.USERS, defaultUsers);
   const [newUserRegistered, setNewUserRegistered] = useState(false);
   const [reservations, setReservations] = useRealtimeSync(STORAGE_KEYS.RESERVATIONS, defaultReservations);
@@ -426,12 +410,7 @@ function App() {
         />;
       case 'users':
         if (isAdmin) {
-          return <UserManagement isDark={isDark} users={users} setUsers={handleUpdateUsers} reservations={reservations} setReservations={setReservations} notifications={notifications} setNotifications={setNotifications} />;
-        }
-        return <Dashboard isDark={isDark} isAdmin={isAdmin} currentUser={currentUser} reservations={reservations} rooms={rooms} currentRoomId={currentRoomId} setCurrentPage={setCurrentPage} />;
-      case 'adminFaces':
-        if (isAdmin) {
-          return <AdminFaceManager isDark={isDark} />;
+          return <UserManagement isDark={isDark} isAdmin={isAdmin} users={users} setUsers={handleUpdateUsers} reservations={reservations} setReservations={setReservations} notifications={notifications} setNotifications={setNotifications} rooms={rooms} />;
         }
         return <Dashboard isDark={isDark} isAdmin={isAdmin} currentUser={currentUser} reservations={reservations} rooms={rooms} currentRoomId={currentRoomId} setCurrentPage={setCurrentPage} />;
       case 'settings':
@@ -465,41 +444,13 @@ function App() {
       return;
     }
     
-    const hasFaceData = fullUser && fullUser.faceDescriptor && Array.isArray(fullUser.faceDescriptor) && fullUser.faceDescriptor.length === 128;
-
-    if (hasFaceData) {
-      setPendingLoginUser(fullUser);
-      setPendingLoginFaceData({
-        descriptors: [{ descriptor: fullUser.faceDescriptor, name: fullUser.name }],
-        userName: fullUser.name,
-      });
-      setShowFaceVerify(true);
-    } else {
-      completeLogin(fullUser);
-    }
-  };
-
-  const handleAdminFaceLogin = () => {
-    const adminFaces = loadAdminFaces();
-    if (adminFaces.length === 0) {
-      showToastMessage('尚未录入管理员人脸信息，请先使用密码登录并添加人脸', 'error');
-      return;
-    }
-    
-    setPendingLoginFaceData({
-      descriptors: adminFaces,
-      userName: '管理员',
-    });
-    setShowFaceVerify(true);
+    completeLogin(fullUser);
   };
 
   const completeLogin = (user) => {
     setCurrentUser(user);
     setIsLoggedIn(true);
     setShowRegister(false);
-    setShowFaceVerify(false);
-    setPendingLoginUser(null);
-    setPendingLoginFaceData(null);
 
     const uid = user.role === 'admin' ? 'admin' : `user_${user.id || user.email}`;
     const savedRoomId = getStoredRoomForUser(uid);
@@ -509,25 +460,6 @@ function App() {
     } else {
       setCurrentRoomId(firstRoom);
     }
-  };
-
-  const handleFaceVerifySuccess = (matchedAdminName) => {
-    if (pendingLoginUser) {
-      completeLogin(pendingLoginUser);
-    } else if (matchedAdminName) {
-      completeLogin({ 
-        email: 'admin@example.com', 
-        name: '管理员', 
-        role: 'admin', 
-        id: 0 
-      });
-    }
-  };
-
-  const handleFaceVerifyCancel = () => {
-    setShowFaceVerify(false);
-    setPendingLoginUser(null);
-    setPendingLoginFaceData(null);
   };
 
   const handleLogout = () => {
@@ -555,13 +487,31 @@ function App() {
         setIsLoggedIn(false);
         setCurrentUser(null);
       }, 3000);
+    } else if (userExists.cardType && userExists.cardExpire) {
+      const expireDate = new Date(userExists.cardExpire);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      expireDate.setHours(0, 0, 0, 0);
+      
+      if (expireDate < today) {
+        showToastMessage('您的会员卡已过期，请联系管理员续费', 'error');
+        setTimeout(() => {
+          setIsLoggedIn(false);
+          setCurrentUser(null);
+        }, 5000);
+      } else {
+        const diffDays = Math.ceil((expireDate - today) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 3) {
+          showToastMessage(`您的会员卡将在 ${diffDays} 天后到期，请及时续费`, 'error');
+        }
+      }
     }
   }, [users, isLoggedIn, currentUser]);
 
   const handleRegister = (userData) => {
-    const existingUser = users.find(u => u.email === userData.email);
+    const existingUser = users.find(u => u.phone === userData.phone);
     if (existingUser) {
-      showToastMessage('该邮箱已被注册！', 'error');
+      showToastMessage('该手机号已被注册！', 'error');
       return;
     }
     
@@ -569,13 +519,10 @@ function App() {
     const newUser = {
       id: maxId + 1,
       name: userData.name,
-      email: userData.email,
+      phone: userData.phone,
       password: userData.password,
-      phone: '',
       status: 'active',
       role: 'user',
-      faceDescriptor: userData.faceDescriptor || null,
-      faceImage: userData.faceImage || null,
     };
     const updatedUsers = [...users, newUser];
     setUsers(updatedUsers);
@@ -653,40 +600,19 @@ function App() {
     
     if (showRegister) {
       return (
-        <>
-          <Register
-            onRegister={handleRegister}
-            onBackToLogin={() => setShowRegister(false)}
-            users={users}
-          />
-          {showFaceVerify && pendingLoginFaceData && (
-            <FaceVerify
-              storedDescriptors={pendingLoginFaceData.descriptors}
-              userName={pendingLoginFaceData.userName}
-              onSuccess={handleFaceVerifySuccess}
-              onCancel={handleFaceVerifyCancel}
-            />
-          )}
-        </>
+        <Register
+          onRegister={handleRegister}
+          onBackToLogin={() => setShowRegister(false)}
+          users={users}
+        />
       );
     }
     return (
-      <>
-        <Login
-          onLogin={handleLogin}
-          onGoToRegister={() => setShowRegister(true)}
-          users={users}
-          onFaceLogin={handleAdminFaceLogin}
-        />
-        {showFaceVerify && pendingLoginFaceData && (
-          <FaceVerify
-            storedDescriptors={pendingLoginFaceData.descriptors}
-            userName={pendingLoginFaceData.userName}
-            onSuccess={handleFaceVerifySuccess}
-            onCancel={handleFaceVerifyCancel}
-          />
-        )}
-      </>
+      <Login
+        onLogin={handleLogin}
+        onGoToRegister={() => setShowRegister(true)}
+        users={users}
+      />
     );
   }
 
@@ -905,7 +831,7 @@ function App() {
           {renderContent(isAdmin, users, handleUpdateUsers, currentUser)}
         </div>
 
-        <RadioMiniBar isDark={isDark} />
+        <RadioMiniBar isDark={isDark} currentPage={currentPage} />
       </main>
     </div>
   );

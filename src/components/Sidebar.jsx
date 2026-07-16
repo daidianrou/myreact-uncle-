@@ -9,9 +9,7 @@ import {
   Sun,
   ChevronLeft,
   ChevronRight,
-  Home,
-  Radio,
-  User
+  Radio
 } from 'lucide-react';
 
 const menuItems = [
@@ -20,7 +18,6 @@ const menuItems = [
   { id: 'seats', label: '座位管理', icon: Square, adminOnly: false },
   { id: 'reservations', label: '预约管理', icon: Calendar, adminOnly: false },
   { id: 'users', label: '用户管理', icon: Users, adminOnly: true },
-  { id: 'adminFaces', label: '人脸管理', icon: User, adminOnly: true },
   { id: 'settings', label: '系统设置', icon: Settings, adminOnly: false },
 ];
 
@@ -35,15 +32,15 @@ export default function Sidebar({ currentPage, setCurrentPage, isDark, setIsDark
         <div className="flex items-center h-16 px-4 border-b border-gray-200 dark:border-gray-700">
           {!isCollapsed && (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <Home className="w-5 h-5 text-white" />
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden bg-white">
+                <img src={`${process.env.PUBLIC_URL}/ODF.png`} alt="Logo" className="w-full h-full object-contain" />
               </div>
-              <span className="font-bold text-gray-800 dark:text-white">自习室管理</span>
+              <span className="font-bold text-gray-800 dark:text-white">樊登读书自习室</span>
             </div>
           )}
           {isCollapsed && (
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mx-auto">
-              <Home className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto overflow-hidden bg-white">
+              <img src={`${process.env.PUBLIC_URL}/ODF.png`} alt="Logo" className="w-full h-full object-contain" />
             </div>
           )}
         </div>

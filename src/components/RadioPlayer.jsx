@@ -238,13 +238,39 @@ function NowPlaying({ queue, currentIndex, isLive }) {
   );
 }
 
-function MiniBar({ onOpen, isDark }) {
+function MiniBar({ onOpen, isDark, currentPage }) {
   const [now, setNow] = useState(new Date().getHours());
   const [station, setStation] = useState(() => loadStation());
+  const [isHidden, setIsHidden] = useState(false);
+  
   useEffect(() => {
     const t = setInterval(() => { setNow(new Date().getHours()); setStation(loadStation()); }, 30000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!['users', 'reservations'].includes(currentPage)) {
+      setIsHidden(false);
+      return;
+    }
+
+    const handleMouseMove = (e) => {
+      const margin = 150;
+      const isNearBottomRight = 
+        e.clientX > window.innerWidth - margin && 
+        e.clientY > window.innerHeight - margin;
+      
+      if (isNearBottomRight) {
+        setIsHidden(true);
+      } else {
+        setIsHidden(false);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [currentPage]);
+
   const closingHours = now >= 22 || now < 1;
   const cur = station.isLive && station.currentIndex >= 0
     ? (station.queue[station.currentIndex] || station.closingQueue[station.currentIndex])
@@ -254,7 +280,9 @@ function MiniBar({ onOpen, isDark }) {
   return (
     <button
       onClick={onOpen}
-      className={`fixed bottom-4 right-4 z-40 flex items-center gap-3 pl-2 pr-4 py-2 rounded-full shadow-lg border cursor-pointer transition-all hover:scale-[1.02] ${
+      className={`fixed bottom-4 right-4 z-40 flex items-center gap-3 pl-2 pr-4 py-2 rounded-full shadow-lg border cursor-pointer transition-all duration-300 hover:scale-[1.02] ${
+        isHidden ? 'opacity-0 translate-y-8 pointer-events-none' : 'opacity-100 translate-y-0'
+      } ${
         closingHours
           ? 'bg-gradient-to-r from-indigo-600 to-purple-700 text-white border-indigo-400'
           : station.isLive
@@ -281,11 +309,11 @@ function RadioPlayerModal({ onClose, isDark, isAdmin }) {
   );
 }
 
-export function RadioMiniBar({ isDark }) {
+export function RadioMiniBar({ isDark, currentPage }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <MiniBar onOpen={() => setOpen(true)} isDark={isDark} />
+      <MiniBar onOpen={() => setOpen(true)} isDark={isDark} currentPage={currentPage} />
       {open && <RadioPlayerModal onClose={() => setOpen(false)} isDark={isDark} isAdmin={false} />}
     </>
   );
@@ -355,17 +383,31 @@ function RadioPanel({ isDark, isAdmin, onClose }) {
             const prevHasLocal = prevQueue.some(item => item.isLocal || (item.url && item.url.startsWith('data:')));
             const newHasLocal = newQueue.some(item => item.isLocal || (item.url && item.url.startsWith('data:')));
             
-            if (prevHasLocal && !newHasLocal) {
+            if (prevHasLocal && !newHasLocal && prevQueue.length === newQueue.length) {
               return prev;
             }
             
-            return {
-              ...prev,
-              queue: newQueue,
-              closingQueue: s.closingQueue,
-              volume: s.volume,
-              adminUrl: s.adminUrl,
-            };
+            if (newQueue.length > prevQueue.length) {
+              return {
+                ...prev,
+                queue: newQueue,
+                closingQueue: s.closingQueue,
+                volume: s.volume,
+                adminUrl: s.adminUrl,
+              };
+            }
+            
+            if (!prevHasLocal) {
+              return {
+                ...prev,
+                queue: newQueue,
+                closingQueue: s.closingQueue,
+                volume: s.volume,
+                adminUrl: s.adminUrl,
+              };
+            }
+            
+            return prev;
           });
         }
       } catch {

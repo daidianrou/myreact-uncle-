@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Plus, MoreHorizontal, Mail, Phone, User, X, Edit2, Trash2, Eye, AlertCircle, CheckCircle, Lock, MessageSquare, Check, Ban, Unlock, Download } from 'lucide-react';
+import { Search, Plus, MoreHorizontal, Phone, User, X, Edit2, Trash2, Eye, AlertCircle, CheckCircle, Lock, MessageSquare, Check, Ban, Unlock, Download, CreditCard, Clock, CalendarPlus, MapPin } from 'lucide-react';
 
 const statusColors = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
@@ -11,18 +11,28 @@ const statusLabels = {
   inactive: '禁用',
 };
 
-export default function UserManagement({ isDark, users, setUsers, reservations, setReservations, notifications, setNotifications }) {
+const cardTypes = {
+  day: { label: '天卡', days: 1, color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300' },
+  week: { label: '周卡', days: 7, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
+  month: { label: '月卡', days: 30, color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
+  season: { label: '季卡', days: 90, color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
+  year: { label: '年卡', days: 365, color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
+};
+
+export default function UserManagement({ isDark, isAdmin, users, setUsers, reservations, setReservations, notifications, setNotifications, rooms }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showCardModal, setShowCardModal] = useState(false);
   const [showToast, setShowToast] = useState({ show: false, message: '', type: 'success' });
   const [editingUser, setEditingUser] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [hoveredUserId, setHoveredUserId] = useState(null);
   const [userToDelete, setUserToDelete] = useState(null);
+  const [userForCard, setUserForCard] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     phone: '',
     password: '123456',
     remark: '',
@@ -30,11 +40,22 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
 
   const [quickEditRemark, setQuickEditRemark] = useState(null);
   const [quickRemarkValue, setQuickRemarkValue] = useState('');
+  const [exportUserData, setExportUserData] = useState(true);
+  
+  const [cardFormData, setCardFormData] = useState({
+    cardType: '',
+    extendDays: 0,
+    isExtend: false,
+    fixedRoomId: null,
+    fixedSeatId: null,
+    handledBy: '',
+    amountReceived: '',
+  });
 
   const filteredUsers = users.filter(
     (user) =>
       (user.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (user.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (user.phone || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (user.remark || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -43,9 +64,44 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
     setTimeout(() => setShowToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
+  const exportToCSV = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const headers = ['ID', '姓名', '手机号', '会员卡', '到期时间', '状态', '经手人', '收到金额', '收款渠道'];
+    const rows = users.map(u => [
+      u.id,
+      u.name || '',
+      u.phone || '',
+      getCardStatus(u).label,
+      u.cardExpire || '',
+      statusLabels[u.status] || u.status,
+      u.handledBy || '',
+      u.amountReceived || '',
+      u.paymentChannel || '',
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `用户记录_${today}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleAddUser = () => {
-    if (!formData.name || !formData.email || !formData.phone || !formData.password) {
-      showToastMessage('请填写完整信息', 'error');
+    if (!formData.name || !formData.phone || !formData.password) {
+      showToastMessage('请填写姓名和手机号', 'error');
+      return;
+    }
+    if (!/^1\d{10}$/.test(formData.phone)) {
+      showToastMessage('请输入正确的 11 位手机号', 'error');
+      return;
+    }
+    if (users.some(u => u.phone === formData.phone)) {
+      showToastMessage('该手机号已存在', 'error');
       return;
     }
 
@@ -59,20 +115,28 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
 
     setUsers([...users, newUser]);
     setShowAddModal(false);
-    setFormData({ name: '', email: '', phone: '', password: '123456', remark: '' });
+    setFormData({ name: '', phone: '', password: '123456', remark: '' });
     showToastMessage('用户添加成功！');
   };
 
   const handleEditUser = () => {
-    if (!formData.name || !formData.email || !formData.phone || !formData.password) {
-      showToastMessage('请填写完整信息', 'error');
+    if (!formData.name || !formData.phone || !formData.password) {
+      showToastMessage('请填写姓名和手机号', 'error');
+      return;
+    }
+    if (!/^1\d{10}$/.test(formData.phone)) {
+      showToastMessage('请输入正确的 11 位手机号', 'error');
+      return;
+    }
+    if (users.some(u => u.phone === formData.phone && u.id !== editingUser.id)) {
+      showToastMessage('该手机号已存在', 'error');
       return;
     }
 
     setUsers(users.map(u => u.id === editingUser.id ? { ...u, ...formData } : u));
     setShowAddModal(false);
     setEditingUser(null);
-    setFormData({ name: '', email: '', phone: '', password: '123456', remark: '' });
+    setFormData({ name: '', phone: '', password: '123456', remark: '' });
     showToastMessage('用户信息更新成功！');
   };
 
@@ -80,24 +144,26 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
     const deletedUser = users.find(u => u.id === userToDelete);
     
     if (deletedUser) {
-      const userReservations = reservations ? reservations.filter(r => r.userId === deletedUser.id) : [];
-      const userNotifications = notifications ? notifications.filter(n => n.userId === deletedUser.id) : [];
-      
-      const exportData = {
-        user: deletedUser,
-        reservations: userReservations,
-        notifications: userNotifications,
-        exportDate: new Date().toISOString(),
-        exportedBy: '管理员',
-      };
-      
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `用户数据_${deletedUser.name}_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
+      if (exportUserData) {
+        const userReservations = reservations ? reservations.filter(r => r.userId === deletedUser.id) : [];
+        const userNotifications = notifications ? notifications.filter(n => n.userId === deletedUser.id) : [];
+        
+        const exportData = {
+          user: deletedUser,
+          reservations: userReservations,
+          notifications: userNotifications,
+          exportDate: new Date().toISOString(),
+          exportedBy: '管理员',
+        };
+        
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `用户数据_${deletedUser.name}_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
       
       if (setReservations) {
         setReservations(reservations.filter(r => r.userId !== deletedUser.id));
@@ -136,6 +202,90 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
     showToastMessage(newStatus === 'active' ? `${user.name} 已启用` : `${user.name} 已禁用`);
   };
 
+  const handleOpenCardModal = (user) => {
+    setUserForCard(user);
+    setCardFormData({
+      cardType: '',
+      extendDays: 0,
+      isExtend: false,
+      fixedRoomId: user.fixedRoomId || null,
+      fixedSeatId: user.fixedSeatId || null,
+      handledBy: user.handledBy || '',
+      amountReceived: user.amountReceived || '',
+    });
+    setShowCardModal(true);
+  };
+
+  const handleSaveCard = () => {
+    if (!userForCard) return;
+    
+    let newCardType = cardFormData.cardType;
+    let newExpireDate = null;
+    let newStartDate = userForCard.cardStartDate;
+    
+    if (cardFormData.isExtend) {
+      if (cardFormData.extendDays <= 0) {
+        showToastMessage('请输入延期天数', 'error');
+        return;
+      }
+      const baseDate = userForCard.cardExpire ? new Date(userForCard.cardExpire) : new Date();
+      const newDate = new Date(baseDate);
+      newDate.setDate(newDate.getDate() + cardFormData.extendDays);
+      newExpireDate = newDate.toISOString().split('T')[0];
+      newCardType = userForCard.cardType || 'day';
+    } else {
+      if (!cardFormData.cardType) {
+        showToastMessage('请选择卡类型', 'error');
+        return;
+      }
+      const cardInfo = cardTypes[cardFormData.cardType];
+      const now = new Date();
+      newStartDate = now.toISOString().split('T')[0];
+      now.setDate(now.getDate() + cardInfo.days);
+      newExpireDate = now.toISOString().split('T')[0];
+    }
+    
+    setUsers(users.map(u => u.id === userForCard.id ? { 
+      ...u, 
+      cardType: newCardType, 
+      cardExpire: newExpireDate,
+      cardStartDate: newStartDate,
+      fixedRoomId: cardFormData.fixedRoomId,
+      fixedSeatId: cardFormData.fixedSeatId,
+      handledBy: cardFormData.handledBy,
+      amountReceived: cardFormData.amountReceived,
+      paymentChannel: cardFormData.paymentChannel,
+    } : u));
+    setShowCardModal(false);
+    setUserForCard(null);
+    
+    const actionText = cardFormData.isExtend 
+      ? `已为 ${userForCard.name} 延期 ${cardFormData.extendDays} 天`
+      : `已为 ${userForCard.name} 设置 ${cardTypes[cardFormData.cardType].label}`;
+    showToastMessage(actionText);
+  };
+
+  const getCardStatus = (user) => {
+    if (!user.cardType || !user.cardExpire) {
+      return { status: 'none', label: '未开通', color: 'bg-gray-200 text-gray-500' };
+    }
+    const expireDate = new Date(user.cardExpire);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    expireDate.setHours(0, 0, 0, 0);
+    
+    if (expireDate < today) {
+      return { status: 'expired', label: '已过期', color: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' };
+    }
+    
+    const diffDays = Math.ceil((expireDate - today) / (1000 * 60 * 60 * 24));
+    if (diffDays <= 3) {
+      return { status: 'expiring', label: `即将到期 (${diffDays}天)`, color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' };
+    }
+    
+    return { status: 'active', label: `${cardTypes[user.cardType].label} · ${diffDays}天后到期`, color: cardTypes[user.cardType].color };
+  };
+
   const confirmDelete = (userId) => {
     setUserToDelete(userId);
     setShowConfirmModal(true);
@@ -145,7 +295,6 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
     setEditingUser(user);
     setFormData({
       name: user.name,
-      email: user.email,
       phone: user.phone,
       password: user.password,
       remark: user.remark || '',
@@ -177,10 +326,20 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
 
       <div className="flex items-center justify-between mb-6">
         <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>用户管理</h1>
-        <button
+        <div className="flex items-center gap-3">
+          {isAdmin && (
+            <button
+              onClick={exportToCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              导出Excel
+            </button>
+          )}
+          <button
             onClick={() => {
               setEditingUser(null);
-              setFormData({ name: '', email: '', phone: '', password: '123456' });
+              setFormData({ name: '', phone: '', password: '123456' });
               setShowAddModal(true);
             }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors cursor-pointer"
@@ -188,6 +347,7 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
             <Plus className="w-4 h-4" />
             添加用户
           </button>
+        </div>
       </div>
 
       <div className={`relative mb-6 ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
@@ -206,44 +366,26 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
       </div>
 
       <div className={`rounded-xl overflow-hidden ${isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`}>
-        <table className="w-full">
+        <table className="w-full whitespace-nowrap">
           <thead>
             <tr className={`border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-              <th className={`px-6 py-4 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>用户</th>
-              <th className={`px-6 py-4 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4" />
-                  邮箱
-                </div>
-              </th>
-              <th className={`px-6 py-4 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                <div className="flex items-center gap-2">
-                  <Phone className="w-4 h-4" />
-                  电话
-                </div>
-              </th>
-              <th className={`px-6 py-4 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                <div className="flex items-center gap-2">
-                  <Lock className="w-4 h-4" />
-                  密码
-                </div>
-              </th>
-              <th className={`px-6 py-4 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4" />
-                  备注
-                </div>
-              </th>
-              <th className={`px-6 py-4 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>状态</th>
-              <th className={`px-6 py-4 text-center text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>操作</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-20`}>用户</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-32`}>手机号</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-28`}>会员卡</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-28`}>到期时间</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-16`}>状态</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-20`}>经手人</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-28`}>收到金额</th>
+              <th className={`px-4 py-3 text-left text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-24`}>收款渠道</th>
+              <th className={`px-4 py-3 text-center text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-600'} w-32`}>操作</th>
             </tr>
           </thead>
           <tbody>
             {filteredUsers.map((user) => (
               <tr key={user.id} className={`border-b ${isDark ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                <td className={`px-6 py-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center overflow-hidden text-xl">
+                <td className={`px-4 py-3 ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 bg-blue-500 rounded-full flex items-center justify-center overflow-hidden text-lg">
                       {user.avatar ? (
                         user.avatar.startsWith('data:') || user.avatar.startsWith('http') ? (
                           <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
@@ -251,75 +393,78 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
                           user.avatar
                         )
                       ) : (
-                        <User className="w-5 h-5 text-white" />
+                        <User className="w-4 h-4 text-white" />
                       )}
                     </div>
-                    <div>
-                      <div className="font-medium">{user.name}</div>
-                      <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                        用户 ID: {user.id}
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{user.name}</div>
+                      <div className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ID: {user.id}
                       </div>
                     </div>
                   </div>
                 </td>
-                <td className={`px-6 py-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                  {user.email}
-                </td>
-                <td className={`px-6 py-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                <td className={`px-4 py-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                   {user.phone}
                 </td>
-                <td className={`px-6 py-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                  <div className="font-mono text-sm">{user.password}</div>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {(() => {
+                    const cardStatus = getCardStatus(user);
+                    return (
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cardStatus.color} whitespace-nowrap`}>
+                        {cardStatus.label}
+                      </span>
+                    );
+                  })()}
                 </td>
-                <td className="px-6 py-4">
-                  {quickEditRemark === user.id ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={quickRemarkValue}
-                        onChange={(e) => setQuickRemarkValue(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveQuickRemark(user.id); if (e.key === 'Escape') setQuickEditRemark(null); }}
-                        placeholder="例如：VIP"
-                        autoFocus
-                        className={`w-28 px-2 py-1 text-sm rounded border ${isDark ? 'bg-gray-700 border-gray-500 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-1 focus:ring-blue-500`}
-                      />
-                      <button onClick={() => handleSaveQuickRemark(user.id)} className="p-1 rounded text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 cursor-pointer" title="保存">
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => setQuickEditRemark(null)} className="p-1 rounded text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 cursor-pointer" title="取消">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => startQuickEdit(user)}
-                      className={`group flex items-center gap-2 px-2.5 py-1 rounded text-sm cursor-pointer ${
-                        user.remark
-                          ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50'
-                          : `${isDark ? 'text-gray-500 hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-100'}`
-                      }`}
-                      title="点击编辑备注"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span className="truncate max-w-[140px]">{user.remark || '无备注'}</span>
-                    </button>
-                  )}
+                <td className={`px-4 py-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                  <div className="flex items-center gap-1">
+                    <CalendarPlus className="w-3 h-3" />
+                    {user.cardExpire ? user.cardExpire : '-'}
+                  </div>
                 </td>
-                <td className="px-6 py-4">
+                <td className="px-4 py-3">
                   <button
                     onClick={() => handleToggleStatus(user)}
-                    className={`group flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${
+                    className={`group flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
                       user.status === 'active'
                         ? 'bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50'
                         : 'bg-gray-200 text-gray-600 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
                     }`}
                     title={user.status === 'active' ? '点击禁用该用户' : '点击启用该用户'}
                   >
-                    {user.status === 'active' ? <Unlock className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+                    {user.status === 'active' ? <Unlock className="w-3 h-3" /> : <Ban className="w-3 h-3" />}
                     {statusLabels[user.status]}
                   </button>
                 </td>
-                <td className="px-6 py-4 text-center">
+                <td className={`px-4 py-3 ${isDark ? 'text-gray-300' : 'text-gray-800'}`}>
+                  {user.handledBy || '-'}
+                </td>
+                <td className={`px-4 py-3 ${isDark ? 'text-gray-300' : 'text-gray-800'}`}>
+                  {user.amountReceived ? (
+                    <div 
+                      className="relative cursor-pointer inline-block"
+                      onMouseEnter={() => setHoveredUserId(user.id)}
+                      onMouseLeave={() => setHoveredUserId(null)}
+                    >
+                      {hoveredUserId === user.id ? (
+                        <span className="font-medium text-green-600 dark:text-green-400">¥{user.amountReceived}</span>
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          isDark 
+                            ? 'bg-gray-700 text-gray-400' 
+                            : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          ******
+                        </span>
+                      )}
+                    </div>
+                  ) : '-'}
+                </td>
+                <td className={`px-4 py-3 ${isDark ? 'text-gray-300' : 'text-gray-800'}`}>
+                  {user.paymentChannel || '-'}
+                </td>
+                <td className="px-4 py-3 text-center">
                   <div className="inline-flex items-center gap-2">
                     <button
                       onClick={() => handleOpenDetail(user)}
@@ -334,6 +479,13 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
                       title="编辑"
                     >
                       <Edit2 className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                    </button>
+                    <button
+                      onClick={() => handleOpenCardModal(user)}
+                      className="p-2 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors cursor-pointer"
+                      title="会员卡管理"
+                    >
+                      <CreditCard className={`w-4 h-4 ${isDark ? 'text-purple-400' : 'text-purple-500'}`} />
                     </button>
                     <button
                       onClick={() => confirmDelete(user.id)}
@@ -358,7 +510,7 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
               <button onClick={() => {
                 setShowAddModal(false);
                 setEditingUser(null);
-                setFormData({ name: '', email: '', phone: '' });
+                setFormData({ name: '', phone: '' });
               }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
@@ -379,20 +531,7 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
               </div>
 
               <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>邮箱</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className={`w-full px-4 py-2 rounded-lg border ${
-                    isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
-                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                  placeholder="请输入邮箱"
-                />
-              </div>
-
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>电话</label>
+                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>手机号</label>
                 <input
                   type="tel"
                   value={formData.phone}
@@ -400,7 +539,7 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
                   className={`w-full px-4 py-2 rounded-lg border ${
                     isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
                   } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                  placeholder="请输入电话"
+                  placeholder="请输入手机号"
                 />
               </div>
 
@@ -435,7 +574,7 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
                   onClick={() => {
                     setShowAddModal(false);
                     setEditingUser(null);
-                    setFormData({ name: '', email: '', phone: '', password: '123456' });
+                    setFormData({ name: '', phone: '', password: '123456' });
                   }}
                   className={`flex-1 py-2 border rounded-lg ${isDark ? 'border-gray-600 text-gray-300' : 'border-gray-300 text-gray-700'} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer`}
                 >
@@ -475,11 +614,7 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
 
             <div className="space-y-3">
               <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>邮箱</span>
-                <span>{selectedUser.email}</span>
-              </div>
-              <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>电话</span>
+                <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>手机号</span>
                 <span>{selectedUser.phone}</span>
               </div>
               <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
@@ -498,6 +633,16 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
                 </span>
                 <span className={selectedUser.remark ? '' : `${isDark ? 'text-gray-500' : 'text-gray-400'} italic`}>
                   {selectedUser.remark || '暂无备注'}
+                </span>
+              </div>
+              <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                  <MapPin className="w-4 h-4 inline mr-1" />固定座位
+                </span>
+                <span className={selectedUser.fixedRoomId ? 'text-purple-600 dark:text-purple-400' : `${isDark ? 'text-gray-500' : 'text-gray-400'} italic`}>
+                  {selectedUser.fixedRoomId && selectedUser.fixedSeatId 
+                    ? `${rooms.find(r => r.id === selectedUser.fixedRoomId)?.name || '未知房间'} - ${selectedUser.fixedSeatId}号座位`
+                    : '未分配'}
                 </span>
               </div>
             </div>
@@ -544,10 +689,16 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
               </div>
               <h3 className="text-lg font-semibold mb-2">确认删除</h3>
               <p className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>确定要删除该用户吗？此操作不可撤销。</p>
-              <div className={`mt-3 p-3 rounded-lg text-sm flex items-center justify-center gap-2 ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-50 text-blue-600'}`}>
+              <label className={`mt-3 flex items-center justify-center gap-2 cursor-pointer select-none ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                <input
+                  type="checkbox"
+                  checked={exportUserData}
+                  onChange={(e) => setExportUserData(e.target.checked)}
+                  className={`w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer ${isDark ? 'bg-gray-700 border-gray-600' : ''}`}
+                />
                 <Download className="w-4 h-4" />
-                删除时将自动导出该用户的数据
-              </div>
+                <span className="text-sm">导出该用户数据</span>
+              </label>
             </div>
             <div className="flex gap-3 mt-6">
               <button
@@ -564,6 +715,226 @@ export default function UserManagement({ isDark, users, setUsers, reservations, 
                 className="flex-1 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors cursor-pointer"
               >
                 确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCardModal && userForCard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCardModal(false)}>
+          <div className={`bg-white dark:bg-gray-800 rounded-xl p-6 w-96 max-w-[90vw] ${isDark ? 'text-white' : 'text-gray-800'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-purple-500" />
+                会员卡管理
+              </h3>
+              <button onClick={() => { setShowCardModal(false); setUserForCard(null); }} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className={`flex items-center gap-4 mb-6 p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+              <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                <User className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <div className="font-medium">{userForCard.name}</div>
+                <div className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>用户 ID: {userForCard.id}</div>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>当前会员卡状态</label>
+              <div className={`flex items-center gap-2 p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                {(() => {
+                  const cardStatus = getCardStatus(userForCard);
+                  return (
+                    <>
+                      <CreditCard className={`w-4 h-4 ${cardStatus.status === 'none' ? (isDark ? 'text-gray-500' : 'text-gray-400') : cardStatus.status === 'expired' ? 'text-red-500' : cardStatus.status === 'expiring' ? 'text-yellow-500' : 'text-green-500'}`} />
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cardStatus.color}`}>
+                        {cardStatus.label}
+                      </span>
+                      {userForCard.cardExpire && (
+                        <span className={`text-xs ml-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                          到期时间: {userForCard.cardExpire}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            <div className="flex gap-3 mb-6">
+              <button
+                onClick={() => setCardFormData({ ...cardFormData, isExtend: false })}
+                className={`flex-1 py-2 rounded-lg font-medium transition-colors cursor-pointer ${
+                  !cardFormData.isExtend
+                    ? 'bg-purple-500 text-white hover:bg-purple-600'
+                    : `${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`
+                }`}
+              >
+                设置会员卡
+              </button>
+              <button
+                onClick={() => setCardFormData({ ...cardFormData, isExtend: true })}
+                className={`flex-1 py-2 rounded-lg font-medium transition-colors cursor-pointer ${
+                  cardFormData.isExtend
+                    ? 'bg-green-500 text-white hover:bg-green-600'
+                    : `${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`
+                }`}
+              >
+                延期
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {!cardFormData.isExtend ? (
+                <div className="space-y-3">
+                  <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>选择卡类型</label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {Object.entries(cardTypes).map(([key, value]) => (
+                      <button
+                        key={key}
+                        onClick={() => setCardFormData({ ...cardFormData, cardType: key })}
+                        className={`py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                          cardFormData.cardType === key
+                            ? `${value.color} ring-2 ring-offset-2 ${isDark ? 'ring-offset-gray-800' : 'ring-offset-white'} ring-blue-500`
+                            : `${isDark ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`
+                        }`}
+                      >
+                        {value.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                    选择后将从今天开始计算有效期
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>延期天数</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      value={cardFormData.extendDays}
+                      onChange={(e) => setCardFormData({ ...cardFormData, extendDays: Math.max(1, parseInt(e.target.value) || 0) })}
+                      className={`flex-1 px-4 py-2 rounded-lg border ${
+                        isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                      placeholder="请输入延期天数"
+                    />
+                    <span className={`px-3 py-2 rounded-lg ${isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>天</span>
+                  </div>
+                  <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                    从{userForCard.cardExpire ? `${userForCard.cardExpire}` : '今天'}开始计算
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>选择固定座位（可选）</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>自习室</label>
+                    <select
+                      value={cardFormData.fixedRoomId || ''}
+                      onChange={(e) => {
+                        const roomId = e.target.value ? parseInt(e.target.value) : null;
+                        setCardFormData({ ...cardFormData, fixedRoomId: roomId, fixedSeatId: null });
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer`}
+                    >
+                      <option value="">请选择房间</option>
+                      {rooms.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>座位号</label>
+                    <select
+                      value={cardFormData.fixedSeatId || ''}
+                      onChange={(e) => {
+                        const seatId = e.target.value ? parseInt(e.target.value) : null;
+                        setCardFormData({ ...cardFormData, fixedSeatId: seatId });
+                      }}
+                      disabled={!cardFormData.fixedRoomId}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer ${!cardFormData.fixedRoomId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <option value="">请选择座位</option>
+                      {cardFormData.fixedRoomId && (
+                        Array.from({ length: rooms.find(r => r.id === cardFormData.fixedRoomId)?.seatCount || 0 }, (_, i) => (
+                          <option key={i + 1} value={i + 1}>{i + 1}号座位</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                </div>
+                <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  设置后用户将在会员卡有效期内拥有该座位的使用权
+                </p>
+              </div>
+
+              <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>办卡信息</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>经手人</label>
+                    <input
+                      type="text"
+                      value={cardFormData.handledBy}
+                      onChange={(e) => setCardFormData({ ...cardFormData, handledBy: e.target.value })}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                      placeholder="请输入经手人"
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>收到金额</label>
+                    <input
+                      type="number"
+                      value={cardFormData.amountReceived}
+                      onChange={(e) => setCardFormData({ ...cardFormData, amountReceived: e.target.value })}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                      placeholder="请输入金额"
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-medium mb-1.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>收款渠道</label>
+                    <select
+                      value={cardFormData.paymentChannel || ''}
+                      onChange={(e) => setCardFormData({ ...cardFormData, paymentChannel: e.target.value })}
+                      className={`w-full px-3 py-2 rounded-lg border text-sm ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer`}
+                    >
+                      <option value="">请选择</option>
+                      <option value="微信">微信</option>
+                      <option value="支付宝">支付宝</option>
+                      <option value="现金">现金</option>
+                      <option value="银行卡">银行卡</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowCardModal(false); setUserForCard(null); }}
+                className={`flex-1 py-2 border rounded-lg ${isDark ? 'border-gray-600 text-gray-300' : 'border-gray-300 text-gray-700'} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer`}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveCard}
+                className={`flex-1 py-2 rounded-lg font-medium transition-colors cursor-pointer ${
+                  cardFormData.isExtend
+                    ? 'bg-green-500 text-white hover:bg-green-600'
+                    : 'bg-purple-500 text-white hover:bg-purple-600'
+                }`}
+              >
+                {cardFormData.isExtend ? '确认延期' : '确认设置'}
               </button>
             </div>
           </div>

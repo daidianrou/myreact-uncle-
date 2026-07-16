@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Check, X, User, Calendar, Timer, Plus, Eye, AlertCircle, CheckCircle, Building2 } from 'lucide-react';
+import { Check, X, User, Calendar, Timer, Plus, Eye, AlertCircle, CheckCircle, Building2, XCircle } from 'lucide-react';
 
 export default function SeatManagement({ isDark, isAdmin, currentUser, reservations, setReservations, users, rooms, currentRoomId, setCurrentRoomId, addNotification }) {
   const [selectedSeat, setSelectedSeat] = useState(null);
@@ -7,6 +7,7 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showToast, setShowToast] = useState({ show: false, message: '', type: 'success' });
   const [formData, setFormData] = useState({ date: '', startTime: '', endTime: '' });
+  const [bookingUserId, setBookingUserId] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
   const today = new Date().toISOString().split('T')[0];
@@ -100,7 +101,20 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
     setTimeout(() => setShowToast({ show: false, message, type: 'success' }), 3000);
   };
 
+  const getFixedUserForSeat = (seatId) => {
+    return users.find(u => 
+      u.fixedRoomId === currentRoomId && 
+      u.fixedSeatId === seatId && 
+      u.cardType && 
+      u.cardExpire && 
+      new Date(u.cardExpire) >= new Date(new Date().toDateString())
+    );
+  };
+
   const getSeatStatus = (seatId) => {
+    const fixedUser = getFixedUserForSeat(seatId);
+    if (fixedUser) return 'fixed';
+    
     const activeReservation = reservations.find(
       r => r.roomId === currentRoomId && r.seatId === seatId && r.status === 'pending' && r.date >= today
     );
@@ -115,6 +129,9 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
   };
 
   const getSeatUserInfo = (seatId) => {
+    const fixedUser = getFixedUserForSeat(seatId);
+    if (fixedUser) return fixedUser;
+    
     const reservation = getSeatReservation(seatId);
     if (reservation) {
       return users.find(u => u.id === reservation.userId);
@@ -124,14 +141,40 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
 
   const handleSeatClick = (seatId) => {
     const status = getSeatStatus(seatId);
-    if (status === 'occupied') {
+    if (status === 'occupied' || status === 'fixed') {
       setSelectedSeat(seatId);
       setShowSeatDetail(true);
     } else {
       setSelectedSeat(seatId);
       setErrorMessage('');
+      setBookingUserId('');
       setShowBookingModal(true);
     }
+  };
+
+  const [showSeatCancelConfirm, setShowSeatCancelConfirm] = useState(false);
+
+  const handleSeatCancelReservation = () => {
+    const reservation = getSeatReservation(selectedSeat);
+    if (!reservation) {
+      setShowSeatCancelConfirm(false);
+      return;
+    }
+    setReservations(prev => prev.map(r =>
+      r.id === reservation.id
+        ? { ...r, status: 'cancelled' }
+        : r
+    ));
+    addNotification({
+      title: '预约已取消',
+      message: `管理员取消了您在 ${activeRoom?.name || ''} 座位 ${selectedSeat} 的预约（${reservation.date} ${reservation.time}）`,
+      isAllUsers: false,
+      userId: reservation.userId
+    });
+    setShowSeatCancelConfirm(false);
+    setShowSeatDetail(false);
+    setSelectedSeat(null);
+    showToastMessage('预约已取消！');
   };
 
   const getStatusColor = (seatId) => {
@@ -141,6 +184,8 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
         return 'bg-green-500 hover:bg-green-600';
       case 'occupied':
         return 'bg-red-500';
+      case 'fixed':
+        return 'bg-purple-500';
       case 'selected':
         return 'bg-blue-500 hover:bg-blue-600';
       default:
@@ -174,12 +219,37 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
       return;
     }
 
+    if (isAdmin && !bookingUserId) {
+      setErrorMessage('请选择要预约的用户');
+      return;
+    }
+
     const conflictReservation = reservations.find(
       r => r.roomId === currentRoomId && r.seatId === selectedSeat && r.date === formData.date && r.time === time && r.status === 'pending'
     );
 
     if (conflictReservation) {
-      setErrorMessage(`该座位已被预约，请选择其他座位或时间`);
+      setErrorMessage(`⚠ 时间冲突！该座位已被 ${conflictReservation.userName} 在 ${conflictReservation.date} ${conflictReservation.time} 预约，请换座位或调整时间`);
+      return;
+    }
+
+    let targetUserId;
+    let targetUserName;
+    let targetUserObj;
+    if (isAdmin) {
+      targetUserObj = users.find(u => String(u.id) === String(bookingUserId));
+      targetUserId = targetUserObj?.id ?? 0;
+      targetUserName = targetUserObj?.name || '用户';
+    } else {
+      targetUserId = currentUser?.id || 0;
+      targetUserName = currentUser?.name || '用户';
+      targetUserObj = users.find(u => u.id === targetUserId);
+    }
+
+    /* ====== 固定座位用户冲突检测 ====== */
+    const targetUser = targetUserObj || users.find(u => u.id === targetUserId);
+    if (targetUser?.fixedSeatId && targetUser.cardExpire && new Date(targetUser.cardExpire) >= new Date(new Date().toDateString())) {
+      setErrorMessage(`⚠ ${targetUserName} 已有固定座位 ${targetUser.fixedSeatId}（有效期至 ${targetUser.cardExpire}），会员卡有效期内无需预约其他座位`);
       return;
     }
 
@@ -187,8 +257,8 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
     const newReservation = {
       id: newId,
       roomId: currentRoomId,
-      userId: currentUser?.id || 0,
-      userName: currentUser?.name || '用户',
+      userId: targetUserId,
+      userName: targetUserName,
       seatId: selectedSeat,
       date: formData.date,
       time: time,
@@ -199,14 +269,18 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
 
     addNotification({
       title: '预约成功',
-      message: `您已成功预约 ${activeRoom?.name || ''} 座位 ${selectedSeat}，${formData.date} ${formData.time}`,
+      message: isAdmin
+        ? `管理员为您预约了 ${activeRoom?.name || ''} 座位 ${selectedSeat}，${formData.date} ${formData.time}`
+        : `您已成功预约 ${activeRoom?.name || ''} 座位 ${selectedSeat}，${formData.date} ${formData.time}`,
       isAllUsers: false,
-      userId: currentUser?.id || 'unknown'
+      userId: targetUserId
     });
 
     addNotification({
       title: '新预约通知',
-      message: `${currentUser?.name || '用户'} 预约了 ${activeRoom?.name || ''} 座位 ${selectedSeat}，${formData.date} ${time}`,
+      message: isAdmin
+        ? `${currentUser?.name || '管理员'} 为用户 ${targetUserName} 预约了 ${activeRoom?.name || ''} 座位 ${selectedSeat}，${formData.date} ${time}`
+        : `${currentUser?.name || '用户'} 预约了 ${activeRoom?.name || ''} 座位 ${selectedSeat}，${formData.date} ${time}`,
       isAllUsers: false,
       userId: null,
       forAdmin: true,
@@ -214,6 +288,7 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
 
     setShowBookingModal(false);
     setFormData({ date: '', startTime: '', endTime: '' });
+    setBookingUserId('');
     setSelectedSeat(null);
     showToastMessage('预约成功！');
   };
@@ -283,42 +358,55 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                   <div className="w-4 h-4 rounded bg-red-500"></div>
                   <span className={isDark ? 'text-gray-300' : 'text-gray-600'}>已预约 - 点击查看详情</span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded bg-purple-500"></div>
+                  <span className={isDark ? 'text-gray-300' : 'text-gray-600'}>固定座位 - 会员卡用户</span>
+                </div>
               </div>
             </div>
           </div>
 
           <div className={`rounded-xl p-6 ${isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`}>
-            <div
-              className="grid gap-4"
-              style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
-            >
+            <div className="flex justify-center">
+              <div
+                className="grid gap-4"
+                style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 120px))` }}
+              >
               {Array.from({ length: seatCount }).map((_, index) => {
                 const seatId = index + 1;
                 const status = getSeatStatus(seatId);
                 const reservation = getSeatReservation(seatId);
+                const fixedUser = getFixedUserForSeat(seatId);
 
                 return (
                   <button
                     key={seatId}
                     onClick={() => handleSeatClick(seatId)}
-                    className={`aspect-square rounded-lg ${getStatusColor(seatId)} flex flex-col items-center justify-center transition-all hover:scale-105 relative`}
+                    className={`w-28 h-28 rounded-lg ${getStatusColor(seatId)} flex flex-col items-center justify-center transition-all hover:scale-105 relative`}
                   >
                     <span className="text-white font-bold text-lg">{seatId}</span>
-                    {status === 'occupied' && (
+                    {(status === 'occupied' || status === 'fixed') && (
                       <div className="absolute top-2 right-2">
                         <User className="w-4 h-4 text-white/80" />
                       </div>
                     )}
-                    {reservation && (
+                    {fixedUser ? (
+                      <div className={`absolute bottom-2 left-1/2 transform -translate-x-1/2 text-xs text-white/90 font-medium px-2 py-0.5 rounded ${
+                        isDark ? 'bg-black/30' : 'bg-black/20'
+                      }`}>
+                        {fixedUser.name}
+                      </div>
+                    ) : reservation ? (
                       <div className={`absolute bottom-2 left-1/2 transform -translate-x-1/2 text-xs text-white/90 font-medium px-2 py-0.5 rounded ${
                         isDark ? 'bg-black/30' : 'bg-black/20'
                       }`}>
                         {reservation.date === today ? '今天' : '预约中'}
                       </div>
-                    )}
+                    ) : null}
                   </button>
                 );
               })}
+              </div>
             </div>
           </div>
         </>
@@ -336,9 +424,10 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
 
             {(() => {
               const reservation = getSeatReservation(selectedSeat);
+              const fixedUser = getFixedUserForSeat(selectedSeat);
               const user = getSeatUserInfo(selectedSeat);
 
-              if (!reservation) {
+              if (!reservation && !fixedUser) {
                 return (
                   <div className="text-center py-8">
                     <div className={`w-16 h-16 ${isDark ? 'bg-gray-700' : 'bg-gray-100'} rounded-full flex items-center justify-center mx-auto mb-4`}>
@@ -349,8 +438,79 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                 );
               }
 
+              /* ====== 固定座位：显示占用提示 ====== */
+              if (fixedUser) {
+                return (
+                  <div className="space-y-3">
+                    {/* 时间冲突 / 固定座位 警告条幅 */}
+                    <div className="p-3 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg">
+                      <p className="text-sm text-purple-700 dark:text-purple-300 font-medium flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                        该座位为固定座位，已分配给会员用户
+                      </p>
+                      <p className="mt-1 text-xs text-purple-600 dark:text-purple-400">
+                        有效期至 {fixedUser.cardExpire}，期间不可被预约
+                      </p>
+                    </div>
+                    <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>座位号</span>
+                      <span className="font-medium">座位 {selectedSeat}</span>
+                    </div>
+                    <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>固定用户</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
+                          <User className="w-4 h-4 text-white" />
+                        </div>
+                        <span>{fixedUser.name}</span>
+                      </div>
+                    </div>
+                    <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>手机号</span>
+                      <span>{fixedUser.phone || '未绑定'}</span>
+                    </div>
+                    <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>会员卡类型</span>
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        fixedUser.cardType === 'day' ? 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300' :
+                        fixedUser.cardType === 'week' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                        fixedUser.cardType === 'month' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
+                        fixedUser.cardType === 'season' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' :
+                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                      }`}>
+                        {{ day: '天卡', week: '周卡', month: '月卡', season: '季卡', year: '年卡' }[fixedUser.cardType]}
+                      </span>
+                    </div>
+                    <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>
+                        <Calendar className="w-4 h-4 inline mr-1" />
+                        有效期
+                      </span>
+                      <span>{fixedUser.cardStartDate} 至 {fixedUser.cardExpire}</span>
+                    </div>
+                    <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-purple-900/30' : 'bg-purple-50'}`}>
+                      <span className={isDark ? 'text-purple-300' : 'text-purple-700'}>状态</span>
+                      <span className="px-2 py-1 rounded-full text-sm bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300">
+                        固定座位
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              /* ====== 已预约座位：显示时间冲突警告 ====== */
               return (
                 <div className="space-y-3">
+                  {/* 时间冲突警告条幅 */}
+                  <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-red-700 dark:text-red-300 font-medium flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      ⚠ 该座位在 {reservation.date} 已被预约，时间段冲突
+                    </p>
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                      被 {user?.name || reservation.userName} 预约了 {reservation.time}，如需使用请选择其他时段或其他座位
+                    </p>
+                  </div>
                   <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
                     <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>座位号</span>
                     <span className="font-medium">座位 {selectedSeat}</span>
@@ -366,8 +526,8 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                   </div>
                   {user && (
                     <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>用户邮箱</span>
-                      <span>{user.email}</span>
+                      <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>手机号</span>
+                      <span>{user.phone || '未绑定'}</span>
                     </div>
                   )}
                   <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
@@ -394,9 +554,44 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                       {reservation.status === 'pending' ? '待使用' : '已完成'}
                     </span>
                   </div>
+
+                  {isAdmin && reservation.status === 'pending' && (
+                    <button
+                      onClick={() => setShowSeatCancelConfirm(true)}
+                      className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      取消该预约
+                    </button>
+                  )}
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {showSeatCancelConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSeatCancelConfirm(false)}>
+          <div className={`bg-white dark:bg-gray-800 rounded-xl p-6 w-80 max-w-[90vw] ${isDark ? 'text-white' : 'text-gray-800'}`} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-2">确认取消预约</h3>
+            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              确定要取消该座位的当前预约吗？此操作不可撤销，用户将收到取消通知。
+            </p>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowSeatCancelConfirm(false)}
+                className={`flex-1 py-2 rounded-lg border ${isDark ? 'border-gray-600 text-gray-300' : 'border-gray-300 text-gray-700'} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer`}
+              >
+                再想想
+              </button>
+              <button
+                onClick={handleSeatCancelReservation}
+                className="flex-1 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer"
+              >
+                确认取消
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -496,10 +691,30 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                 </p>
               </div>
 
+              {isAdmin && (
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>预约用户</label>
+                  <select
+                    value={bookingUserId}
+                    onChange={(e) => setBookingUserId(e.target.value)}
+                    className={`w-full px-4 py-2 rounded-lg border ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer`}
+                  >
+                    <option value="">请选择用户</option>
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>{u.name}（{u.phone}）</option>
+                    ))}
+                  </select>
+                  <p className={`mt-2 text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    以管理员身份代用户预约，用户无需登录即可占位
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={() => {
                     setShowBookingModal(false);
+                    setBookingUserId('');
                     setSelectedSeat(null);
                   }}
                   className={`flex-1 py-2 border rounded-lg ${isDark ? 'border-gray-600 text-gray-300' : 'border-gray-300 text-gray-700'} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer`}

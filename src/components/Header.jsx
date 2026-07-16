@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Bell, User, ChevronDown, X, Settings, HelpCircle, UserCircle, LogOut, Edit2, Check, Phone, Mail, Image, Palette, Fingerprint, Camera, CheckCircle, Circle, RefreshCw } from 'lucide-react';
-import FaceCapture from './FaceCapture';
+import { Search, Bell, User, ChevronDown, X, Settings, HelpCircle, UserCircle, LogOut, Edit2, Check, Phone, Image, Palette, RefreshCw, CreditCard } from 'lucide-react';
 import { formatTimeAgo } from '../utils/timeUtils';
 
 const AVATAR_PRESETS = [
@@ -65,7 +64,6 @@ export default function Header({ isDark, currentUser, isAdmin, newUserRegistered
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', phone: '', avatar: '' });
-  const [showFaceModal, setShowFaceModal] = useState(false);
   const fileInputRef = useRef(null);
   
   useEffect(() => {
@@ -109,7 +107,7 @@ export default function Header({ isDark, currentUser, isAdmin, newUserRegistered
         const newNotification = {
           id: Date.now(),
           title: '新用户注册',
-          message: `${latestUser.name} 已注册账户，邮箱：${latestUser.email}`,
+          message: `${latestUser.name} 已注册账户，手机号：${latestUser.phone}`,
           timestamp: Date.now(),
           read: false,
           type: 'newUser',
@@ -443,7 +441,7 @@ export default function Header({ isDark, currentUser, isAdmin, newUserRegistered
                       <AvatarView value={currentUser?.avatar} size="lg" isDark={isDark} />
                       <div>
                         <h4 className="font-semibold text-lg">{currentUser?.name || '用户'}</h4>
-                        <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{currentUser?.email || ''}</p>
+                        <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{currentUser?.phone || '未绑定手机号'}</p>
                         <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                           {currentUser?.avatar ? '已设置头像' : '使用默认头像'}
                         </p>
@@ -467,25 +465,49 @@ export default function Header({ isDark, currentUser, isAdmin, newUserRegistered
                         </span>
                         <span>{currentUser?.phone || '未设置'}</span>
                       </div>
-                      <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                        <span className="flex items-center gap-2">
-                          <UserCircle className="w-4 h-4" />
-                          <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>人脸认证</span>
-                        </span>
-                        <span className={`flex items-center gap-1 ${currentUser?.faceDescriptor ? 'text-green-600 dark:text-green-400' : 'text-gray-400'}`}>
-                          {currentUser?.faceDescriptor ? (
-                            <>
-                              <CheckCircle className="w-4 h-4" />
-                              已绑定
-                            </>
-                          ) : (
-                            <>
-                              <Circle className="w-4 h-4" />
-                              未绑定
-                            </>
-                          )}
-                        </span>
-                      </div>
+                      {currentUser?.role !== 'admin' && (
+                        <div className={`flex justify-between p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                          <span className="flex items-center gap-2">
+                            <CreditCard className="w-4 h-4" />
+                            <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>会员卡</span>
+                          </span>
+                          <div className="text-right">
+                            {(() => {
+                              if (!currentUser?.cardType || !currentUser?.cardExpire) {
+                                return <span className="text-gray-400">未开通</span>;
+                              }
+                              const cardTypes = {
+                                day: '天卡',
+                                week: '周卡',
+                                month: '月卡',
+                                season: '季卡',
+                                year: '年卡',
+                              };
+                              const expireDate = new Date(currentUser.cardExpire);
+                              const today = new Date();
+                              today.setHours(0, 0, 0, 0);
+                              expireDate.setHours(0, 0, 0, 0);
+                              if (expireDate < today) {
+                                return (
+                                  <div>
+                                    <span className="text-red-500">{cardTypes[currentUser.cardType]} · 已过期</span>
+                                    <div className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>到期时间: {currentUser.cardExpire}</div>
+                                  </div>
+                                );
+                              }
+                              const diffDays = Math.ceil((expireDate - today) / (1000 * 60 * 60 * 24));
+                              return (
+                                <div>
+                                  <span className={diffDays <= 3 ? 'text-yellow-500' : 'text-green-600 dark:text-green-400'}>
+                                    {cardTypes[currentUser.cardType]} · {diffDays}天后到期
+                                  </span>
+                                  <div className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>到期时间: {currentUser.cardExpire}</div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <button
                       onClick={handleEditProfile}
@@ -597,66 +619,8 @@ export default function Header({ isDark, currentUser, isAdmin, newUserRegistered
                         保存修改
                       </button>
                     </div>
-
-                    {/* 人脸管理 */}
-                    <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-gray-700 border-gray-600' : 'bg-yellow-50 border-yellow-200'}`}>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="flex items-center gap-2">
-                          <Fingerprint className="w-4 h-4 text-yellow-600" />
-                          <span className={`text-sm font-medium ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>人脸认证管理</span>
-                        </span>
-                        <span className={`text-xs ${currentUser?.faceDescriptor ? 'text-green-600 dark:text-green-400' : 'text-gray-500'}`}>
-                          {currentUser?.faceDescriptor ? '已录入人脸' : '未录入'}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setShowFaceModal(true)}
-                        className={`w-full py-2 rounded-lg text-sm flex items-center justify-center gap-2 cursor-pointer ${
-                          currentUser?.faceDescriptor
-                            ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                            : 'bg-blue-500 hover:bg-blue-600 text-white'
-                        } transition-colors`}
-                      >
-                        <Camera className="w-4 h-4" />
-                        {currentUser?.faceDescriptor ? '重新录入人脸' : '录入人脸'}
-                      </button>
-                    </div>
                   </>
                 )}
-              </div>
-            )}
-
-            {/* 人脸采集弹窗 */}
-            {showFaceModal && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowFaceModal(false)}>
-                <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-lg w-full mx-4" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                      {currentUser?.faceDescriptor ? '重新录入人脸' : '录入人脸'}
-                    </h3>
-                    <button
-                      onClick={() => setShowFaceModal(false)}
-                      className={`p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer`}
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <FaceCapture
-                    onComplete={(data) => {
-                      if (data.descriptors && data.descriptors.length > 0) {
-                        const updatedUser = { 
-                          ...currentUser, 
-                          faceDescriptor: data.descriptors[0], 
-                          faceImage: data.image 
-                        };
-                        updateCurrentUser(updatedUser);
-                      }
-                      setShowFaceModal(false);
-                    }}
-                    onSkip={() => setShowFaceModal(false)}
-                    existingFace={currentUser?.faceDescriptor ? '有' : '无'}
-                  />
-                </div>
               </div>
             )}
 

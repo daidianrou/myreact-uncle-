@@ -1,11 +1,9 @@
 import { useState } from 'react';
-import { Eye, EyeOff, Home, Mail, Lock, User, ArrowLeft, Shield, X } from 'lucide-react';
-import FaceCapture from './FaceCapture';
+import { Eye, EyeOff, Home, Phone, Lock, User, ArrowLeft } from 'lucide-react';
 
 export default function Register({ onRegister, onBackToLogin, users }) {
-  const [step, setStep] = useState('form'); // form | face
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -15,8 +13,13 @@ export default function Register({ onRegister, onBackToLogin, users }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    if (!name || !email || !password || !confirmPassword) {
+    if (!name || !phone || !password || !confirmPassword) {
       setError('请填写完整信息');
+      return;
+    }
+
+    if (!/^1\d{10}$/.test(phone)) {
+      setError('请输入正确的 11 位手机号');
       return;
     }
 
@@ -31,35 +34,15 @@ export default function Register({ onRegister, onBackToLogin, users }) {
     }
 
     if (users) {
-      const existingUser = users.find(u => u.email === email);
+      const existingUser = users.find(u => u.phone === phone);
       if (existingUser) {
-        setError('该邮箱已被注册！');
+        setError('该手机号已被注册！');
         return;
       }
     }
 
     setError('');
-    setStep('face');
-  };
-
-  const handleFaceCapture = (faceData) => {
-    // 注册并携带人脸数据
-    onRegister({ 
-      name, 
-      email, 
-      password,
-      faceDescriptor: faceData.descriptor,
-      faceImage: faceData.image,
-    });
-  };
-
-  const handleSkipFace = () => {
-    // 跳过人脸采集，正常注册
-    onRegister({ name, email, password });
-  };
-
-  const handleCancelFace = () => {
-    setStep('form');
+    onRegister({ name, phone, password });
   };
 
   return (
@@ -71,12 +54,8 @@ export default function Register({ onRegister, onBackToLogin, users }) {
             : 'bg-white'
         }`}>
           <div className="text-center mb-8">
-            <div className={`w-16 h-16 mx-auto rounded-xl flex items-center justify-center mb-4 ${
-              document.documentElement.classList.contains('dark') 
-                ? 'bg-blue-600' 
-                : 'bg-blue-500'
-            }`}>
-              <Home className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 mx-auto rounded-xl flex items-center justify-center mb-4 overflow-hidden bg-white">
+              <img src={`${process.env.PUBLIC_URL}/ODF.png`} alt="Logo" className="w-full h-full object-contain p-1" />
             </div>
             <h1 className={`text-2xl font-bold mb-2 ${
               document.documentElement.classList.contains('dark') 
@@ -139,7 +118,7 @@ export default function Register({ onRegister, onBackToLogin, users }) {
                   ? 'text-gray-300' 
                   : 'text-gray-700'
               }`}>
-                邮箱地址
+                手机号
               </label>
               <div className={`relative ${
                 document.documentElement.classList.contains('dark') 
@@ -150,16 +129,16 @@ export default function Register({ onRegister, onBackToLogin, users }) {
                   ? 'border-gray-600' 
                   : 'border-gray-300'
               } focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-200 transition-colors`}>
-                <Mail className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 ${
+                <Phone className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 ${
                   document.documentElement.classList.contains('dark') 
                     ? 'text-gray-400' 
                     : 'text-gray-400'
                 }`} />
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="请输入邮箱地址"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="请输入手机号"
                   className={`w-full pl-10 pr-4 py-3 bg-transparent outline-none ${
                     document.documentElement.classList.contains('dark') 
                       ? 'text-white placeholder-gray-400' 
@@ -267,7 +246,7 @@ export default function Register({ onRegister, onBackToLogin, users }) {
               type="submit"
               className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors"
             >
-              下一步：人脸采集
+              注册
             </button>
           </form>
 
@@ -285,37 +264,6 @@ export default function Register({ onRegister, onBackToLogin, users }) {
             </button>
           </div>
         </div>
-
-        {/* 人脸采集弹窗 */}
-        {step === 'face' && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-[480px] max-w-[90vw] overflow-hidden ${document.documentElement.classList.contains('dark') ? 'text-white' : 'text-gray-800'}`}>
-              <div className={`flex items-center justify-between px-6 py-4 border-b ${document.documentElement.classList.contains('dark') ? 'border-gray-700' : 'border-gray-200'}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${document.documentElement.classList.contains('dark') ? 'bg-blue-600' : 'bg-blue-500'}`}>
-                    <Shield className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-base">人脸信息采集</h3>
-                    <p className={`text-xs ${document.documentElement.classList.contains('dark') ? 'text-gray-400' : 'text-gray-500'}`}>确认本人操作</p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleCancelFace}
-                  className={`p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors`}
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-4">
-                <FaceCapture
-                  onCapture={handleFaceCapture}
-                  onSkip={handleSkipFace}
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

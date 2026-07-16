@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useMemo } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useMemo } from 'react';
 import { Calendar, Timer, User, ChevronDown, Eye, Edit2, Trash2, X, CheckCircle, AlertCircle, Plus, Download, MapPin, Building2 } from 'lucide-react';
 
 const statusColors = {
@@ -27,7 +27,8 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
   const [showToast, setShowToast] = useState({ show: false, message: '', type: 'success' });
   const [selectedReservation, setSelectedReservation] = useState(null);
   const [editingReservation, setEditingReservation] = useState(null);
-  const [formData, setFormData] = useState({ date: '', startTime: '', endTime: '', seat: '' });
+  const [formData, setFormData] = useState({ date: '', startTime: '', endTime: '', seat: '', room: '' });
+  const [bookingUserId, setBookingUserId] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState(rooms.length > 0 ? rooms[0].id : 1);
 
@@ -106,14 +107,14 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
   const handleOpenEdit = (reservation) => {
     setEditingReservation(reservation);
     const { startTime, endTime } = splitTime(reservation.time);
-    setFormData({ date: reservation.date, startTime, endTime, seat: String(reservation.seatId) });
+    setFormData({ date: reservation.date, startTime, endTime, seat: String(reservation.seatId), room: reservation.roomId ? String(reservation.roomId) : '' });
     setShowEditModal(true);
   };
 
   const handleEditReservation = () => {
     const time = joinTime(formData);
-    if (!formData.date || !time || !formData.seat) {
-      showToastMessage('请填写完整信息', 'error');
+    if (!formData.date || !time || !formData.seat || !formData.room) {
+      showToastMessage('请填写完整信息（房间、日期、时间、座位号）', 'error');
       return;
     }
     if (!isValidTimeRange(formData.date, formData.startTime, formData.endTime)) {
@@ -123,21 +124,29 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
 
     setReservations(reservations.map(r =>
       r.id === editingReservation.id
-        ? { ...r, date: formData.date, time, seatId: parseInt(formData.seat) }
+        ? { ...r, date: formData.date, time, roomId: parseInt(formData.room), seatId: parseInt(formData.seat) }
         : r
     ));
     setShowEditModal(false);
     setEditingReservation(null);
-    setFormData({ date: '', startTime: '', endTime: '', seat: '' });
+    setFormData({ date: '', startTime: '', endTime: '', seat: '', room: '' });
     showToastMessage('预约信息更新成功！');
   };
 
   const handleCancelReservation = () => {
+    const cancelled = selectedReservation;
     setReservations(reservations.map(r =>
-      r.id === selectedReservation.id
+      r.id === cancelled.id
         ? { ...r, status: 'cancelled' }
         : r
     ));
+    const room = rooms.find(rm => rm.id === cancelled.roomId);
+    addNotification({
+      title: '预约已取消',
+      message: `管理员取消了您在 ${room?.name || ''} 座位 ${cancelled.seatId} 的预约（${cancelled.date} ${cancelled.time}）`,
+      isAllUsers: false,
+      userId: cancelled.userId
+    });
     setShowConfirmModal(false);
     setShowDetailModal(false);
     setSelectedReservation(null);
@@ -228,8 +237,8 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
     setErrorMessage('');
     
     const time = joinTime(formData);
-    if (!formData.date || !time || !formData.seat) {
-      setErrorMessage('请填写完整的预约信息');
+    if (!formData.date || !time || !formData.seat || !formData.room) {
+      setErrorMessage('请填写完整的预约信息（房间、日期、时间、座位号）');
       return;
     }
 
@@ -249,19 +258,53 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
     }
 
     const existingReservation = reservations.find(
-      r => r.seatId === parseInt(formData.seat) && r.date === formData.date && r.time === time && r.status === 'pending'
+      r => r.roomId === parseInt(formData.room) && r.seatId === parseInt(formData.seat) && r.date === formData.date && r.time === time && r.status === 'pending'
     );
 
     if (existingReservation) {
-      setErrorMessage('该座位在该时段已被预约');
+      const roomName = rooms.find(r => r.id === parseInt(formData.room))?.name || '该房间';
+      setErrorMessage(`${roomName}的座位 ${formData.seat} 在该时段已被预约`);
       return;
     }
+
+    if (isAdmin && !bookingUserId) {
+      setErrorMessage('请选择要预约的用户');
+      return;
+    }
+
+    let targetUserId;
+    let targetUserName;
+    if (isAdmin) {
+      const targetUser = users.find(u => String(u.id) === String(bookingUserId));
+      targetUserId = targetUser?.id ?? 0;
+      targetUserName = targetUser?.name || '用户';
+
+      /* ====== 固定座位用户冲突检测（管理员代约）====== */
+      if (targetUser?.fixedSeatId && targetUser.cardExpire && new Date(targetUser.cardExpire) >= new Date(new Date().toDateString())) {
+        setErrorMessage(`⚠ ${targetUserName} 已有固定座位 ${targetUser.fixedSeatId}（有效期至 ${targetUser.cardExpire}），会员卡有效期内无需预约其他座位`);
+        return;
+      }
+    } else {
+      targetUserId = currentUser?.id || 0;
+      targetUserName = currentUser?.name || '用户';
+
+      /* ====== 固定座位用户冲突检测（普通用户自约）====== */
+      const selfUser = users.find(u => u.id === targetUserId);
+      if (selfUser?.fixedSeatId && selfUser.cardExpire && new Date(selfUser.cardExpire) >= new Date(new Date().toDateString())) {
+        setErrorMessage(`⚠ 您已有固定座位 ${selfUser.fixedSeatId}（有效期至 ${selfUser.cardExpire}），会员卡有效期内无需预约其他座位`);
+        return;
+      }
+    }
+
+    const selectedRoom = rooms.find(r => r.id === parseInt(formData.room));
+    const roomName = selectedRoom?.name || '';
 
     const newId = reservations.length > 0 ? Math.max(...reservations.map(r => r.id)) + 1 : 1;
     const newReservation = {
       id: newId,
-      userId: currentUser?.id || 0,
-      userName: currentUser?.name || '用户',
+      userId: targetUserId,
+      userName: targetUserName,
+      roomId: parseInt(formData.room),
       seatId: parseInt(formData.seat),
       date: formData.date,
       time: time,
@@ -272,32 +315,52 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
 
     addNotification({
       title: '预约成功',
-      message: `您已成功预约座位 ${formData.seat}，${formData.date} ${time}`,
+      message: isAdmin
+        ? `管理员为您预约了${roomName}座位 ${formData.seat}，${formData.date} ${time}`
+        : `您已成功预约${roomName}座位 ${formData.seat}，${formData.date} ${time}`,
       isAllUsers: false,
-      userId: currentUser?.id || 'unknown'
+      userId: targetUserId
     });
 
     addNotification({
       title: '新预约通知',
-      message: `${currentUser?.name || '用户'} 预约了座位 ${formData.seat}，${formData.date} ${time}`,
+      message: isAdmin
+        ? `${currentUser?.name || '管理员'} 为用户 ${targetUserName} 预约了${roomName}座位 ${formData.seat}，${formData.date} ${time}`
+        : `${currentUser?.name || '用户'} 预约了${roomName}座位 ${formData.seat}，${formData.date} ${time}`,
       isAllUsers: false,
       userId: null,
       forAdmin: true,
     });
 
     setShowAddModal(false);
-    setFormData({ date: '', startTime: '', endTime: '', seat: '' });
+    setFormData({ date: '', startTime: '', endTime: '', seat: '', room: '' });
+    setBookingUserId('');
     showToastMessage('预约成功！');
   };
 
   const handleOpenAdd = () => {
-    setFormData({ date: '', startTime: '', endTime: '', seat: '' });
+    setFormData({ date: '', startTime: '', endTime: '', seat: '', room: '' });
+    setBookingUserId('');
     setErrorMessage('');
     setShowAddModal(true);
   };
 
   const getUserInfo = (userId) => {
     return users.find(u => u.id === userId);
+  };
+
+  const getUserFixedSeat = (userId) => {
+    const user = users.find(u => u.id === userId);
+    if (user && user.fixedRoomId && user.fixedSeatId && user.cardType && user.cardExpire) {
+      const expireDate = new Date(user.cardExpire);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      expireDate.setHours(0, 0, 0, 0);
+      if (expireDate >= today) {
+        return { roomId: user.fixedRoomId, seatId: user.fixedSeatId, expireDate: user.cardExpire };
+      }
+    }
+    return null;
   };
 
   return (
@@ -388,7 +451,7 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
                       <td className={`px-6 py-4 ${isDark ? 'text-gray-300' : 'text-gray-800'}`}>#{String(reservation.id).padStart(4, '0')}</td>
                       <td className={`px-6 py-4 ${isDark ? 'text-gray-300' : 'text-gray-800'}`}>
                         <div className="flex items-center gap-2">
-                          <div className={`w-8 h-8 rounded-full ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-100 text-blue-800'} flex items-center justify-center overflow-hidden text-lg`}>
+                          <div className={`w-8 h-8 rounded-full ${isDark ? 'bg-blue-900/30 text-blue-300' : 'bg-blue-100 text-blue-800'} flex items-center justify-center overflow-hidden text-lg relative`}>
                             {user?.avatar ? (
                               user.avatar.startsWith('data:') || user.avatar.startsWith('http') ? (
                                 <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
@@ -398,9 +461,17 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
                             ) : (
                               (user?.name || reservation.userName).charAt(0)
                             )}
+                            {getUserFixedSeat(reservation.userId) && (
+                              <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+                            )}
                           </div>
                           <div>
-                            <div>{user?.name || reservation.userName}</div>
+                            <div className="flex items-center gap-1">
+                              {user?.name || reservation.userName}
+                              {getUserFixedSeat(reservation.userId) && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">固定座位</span>
+                              )}
+                            </div>
                             <div className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
                               {user?.role === 'admin' ? '管理员' : '用户'}
                             </div>
@@ -508,7 +579,12 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
                     <User className="w-4 h-4 text-gray-400" />
                     <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>用户</span>
                   </div>
-                  <span className="font-medium">{getUserInfo(selectedReservation.userId)?.name || selectedReservation.userName}</span>
+                  <span className="font-medium">
+                    {getUserInfo(selectedReservation.userId)?.name || selectedReservation.userName}
+                    {getUserFixedSeat(selectedReservation.userId) && (
+                      <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">固定座位</span>
+                    )}
+                  </span>
                 </div>
                 <div className={`flex justify-between items-center p-3 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-50'}`}>
                   <div className="flex items-center gap-2">
@@ -583,6 +659,24 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
 
             <div className="space-y-4">
               <div>
+                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>选择房间</label>
+                <select
+                  value={formData.room}
+                  onChange={(e) => {
+                    const newRoomId = e.target.value;
+                    setFormData({ ...formData, room: newRoomId, seat: '' });
+                  }}
+                  className={`w-full px-4 py-2 rounded-lg border ${
+                    isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer`}
+                >
+                  <option value="">请选择房间</option>
+                  {rooms.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}（{r.seatCount} 个座位）</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>日期</label>
                 <input
                   type="date"
@@ -654,13 +748,14 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
                 <input
                   type="number"
                   min="1"
-                  max="25"
+                  max={formData.room ? (rooms.find(r => r.id === parseInt(formData.room))?.seatCount || 25) : 25}
                   value={formData.seat}
                   onChange={(e) => setFormData({ ...formData, seat: e.target.value })}
+                  disabled={!formData.room}
                   className={`w-full px-4 py-2 rounded-lg border ${
                     isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
-                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                  placeholder="1-25"
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 ${!formData.room ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  placeholder={formData.room ? `1-${rooms.find(r => r.id === parseInt(formData.room))?.seatCount || 25}` : '请先选择房间'}
                 />
               </div>
 
@@ -705,6 +800,25 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
                   </p>
                 </div>
               )}
+              <div>
+                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>选择房间</label>
+                <select
+                  value={formData.room}
+                  onChange={(e) => {
+                    const newRoomId = e.target.value;
+                    setFormData({ ...formData, room: newRoomId, seat: '' });
+                    setErrorMessage('');
+                  }}
+                  className={`w-full px-4 py-2 rounded-lg border ${
+                    isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer`}
+                >
+                  <option value="">请选择房间</option>
+                  {rooms.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}（{r.seatCount} 个座位）</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>预约日期</label>
                 <input
@@ -777,19 +891,42 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
                 <input
                   type="number"
                   min="1"
-                  max="25"
+                  max={formData.room ? (rooms.find(r => r.id === parseInt(formData.room))?.seatCount || 25) : 25}
                   value={formData.seat}
                   onChange={(e) => setFormData({ ...formData, seat: e.target.value })}
+                  disabled={!formData.room}
                   className={`w-full px-4 py-2 rounded-lg border ${
                     isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'
-                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                  placeholder="1-25"
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 ${!formData.room ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  placeholder={formData.room ? `1-${rooms.find(r => r.id === parseInt(formData.room))?.seatCount || 25}` : '请先选择房间'}
                 />
               </div>
 
+              {isAdmin && (
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>预约用户</label>
+                  <select
+                    value={bookingUserId}
+                    onChange={(e) => setBookingUserId(e.target.value)}
+                    className={`w-full px-4 py-2 rounded-lg border ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer`}
+                  >
+                    <option value="">请选择用户</option>
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>{u.name}（{u.phone}）</option>
+                    ))}
+                  </select>
+                  <p className={`mt-2 text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                    以管理员身份代用户预约，用户无需登录即可占位
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <button
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setBookingUserId('');
+                  }}
                   className={`flex-1 py-2 border rounded-lg ${isDark ? 'border-gray-600 text-gray-300' : 'border-gray-300 text-gray-700'} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer`}
                 >
                   取消
@@ -850,18 +987,16 @@ export default function ReservationManagement({ isDark, isAdmin, currentUser, re
         </div>
       )}
 
-      {showToast && (
-        <div className="fixed top-20 right-4 z-50 animate-pulse">
-          <div className={`px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${
-            showToast.type === 'success'
-              ? 'bg-green-500 text-white'
-              : 'bg-red-500 text-white'
-          }`}>
-            {showToast.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            {showToast.message}
-          </div>
+      <div className={`fixed top-20 right-4 z-50 transition-opacity duration-300 ${showToast.show ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className={`px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${
+          showToast.type === 'success'
+            ? 'bg-green-500 text-white'
+            : 'bg-red-500 text-white'
+        }`}>
+          {showToast.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          {showToast.message}
         </div>
-      )}
+      </div>
     </div>
   );
 }
