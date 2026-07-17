@@ -1,17 +1,20 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Search, X, Users, Calendar, MapPin, AlertCircle } from 'lucide-react';
 import { useRealtimeSync, STORAGE_KEYS } from './hooks/useRealtimeSync';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
-import Dashboard from './components/Dashboard';
-import SeatManagement from './components/SeatManagement';
-import ReservationManagement from './components/ReservationManagement';
-import UserManagement from './components/UserManagement';
-import Settings from './components/Settings';
 import Login from './components/Login';
 import Register from './components/Register';
-import Minesweeper from './components/Minesweeper';
 import RadioPlayer, { RadioMiniBar } from './components/RadioPlayer';
+
+// 路由级代码分割：首屏只加载外壳 + 当前页 JS，其余页面按需加载，
+// 避免把 ECharts（仪表盘）等当前页用不到的代码打进首屏 bundle，从而缩短 LCP
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const SeatManagement = lazy(() => import('./components/SeatManagement'));
+const ReservationManagement = lazy(() => import('./components/ReservationManagement'));
+const UserManagement = lazy(() => import('./components/UserManagement'));
+const Settings = lazy(() => import('./components/Settings'));
+const Minesweeper = lazy(() => import('./components/Minesweeper'));
 
 const defaultUsers = [
   { id: 1, name: '张三', email: 'zhangsan@example.com', phone: '13800138001', status: 'active', password: '123456', role: 'user', remark: 'VIP', cardType: 'year', cardStartDate: new Date().toISOString().split('T')[0], cardExpire: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], fixedRoomId: 1, fixedSeatId: 5, handledBy: '', amountReceived: '' },
@@ -828,7 +831,13 @@ function App() {
         )}
 
         <div className={`${isDark ? 'bg-gray-900' : 'bg-gray-50'} min-h-[calc(100vh-64px)]`}>
-          {renderContent(isAdmin, users, handleUpdateUsers, currentUser)}
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-[60vh]">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+            </div>
+          }>
+            {renderContent(isAdmin, users, handleUpdateUsers, currentUser)}
+          </Suspense>
         </div>
 
         <RadioMiniBar isDark={isDark} currentPage={currentPage} />
