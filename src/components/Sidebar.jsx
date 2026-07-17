@@ -35,7 +35,7 @@ export default function Sidebar({ currentPage, setCurrentPage, isDark, setIsDark
               <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden bg-white">
                 <img src={`${process.env.PUBLIC_URL}/ODF.png`} alt="Logo" className="w-full h-full object-contain" />
               </div>
-              <span className="font-bold text-gray-800 dark:text-white">樊登读书自习室</span>
+              <span className="font-bold text-gray-800 dark:text-white">云创自习室</span>
             </div>
           )}
           {isCollapsed && (

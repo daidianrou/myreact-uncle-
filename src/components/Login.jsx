@@ -54,7 +54,7 @@ export default function Login({ onLogin, onGoToRegister, users }) {
               document.documentElement.classList.contains('dark') 
                 ? 'text-white' 
                 : 'text-gray-800'
-            }`}>樊登读书自习室</h1>
+            }`}>云创自习室</h1>
             <p className={`text-sm ${
               document.documentElement.classList.contains('dark') 
                 ? 'text-gray-400' 
