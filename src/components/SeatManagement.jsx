@@ -9,8 +9,16 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
   const [formData, setFormData] = useState({ date: '', startTime: '', endTime: '' });
   const [bookingUserId, setBookingUserId] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   const today = new Date().toISOString().split('T')[0];
+
+  const formatDateLabel = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${week}`;
+  };
 
   
 
@@ -111,28 +119,28 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
     );
   };
 
-  const getSeatStatus = (seatId) => {
+  const getSeatStatus = (seatId, date = selectedDate) => {
     const fixedUser = getFixedUserForSeat(seatId);
     if (fixedUser) return 'fixed';
     
     const activeReservation = reservations.find(
-      r => r.roomId === currentRoomId && r.seatId === seatId && r.status === 'pending' && r.date >= today
+      r => r.roomId === currentRoomId && r.seatId === seatId && r.status === 'pending' && r.date === date
     );
     if (activeReservation) return 'occupied';
     return 'available';
   };
 
-  const getSeatReservation = (seatId) => {
+  const getSeatReservation = (seatId, date = selectedDate) => {
     return reservations.find(
-      r => r.roomId === currentRoomId && r.seatId === seatId && r.status === 'pending' && r.date >= today
+      r => r.roomId === currentRoomId && r.seatId === seatId && r.status === 'pending' && r.date === date
     );
   };
 
-  const getSeatUserInfo = (seatId) => {
+  const getSeatUserInfo = (seatId, date = selectedDate) => {
     const fixedUser = getFixedUserForSeat(seatId);
     if (fixedUser) return fixedUser;
     
-    const reservation = getSeatReservation(seatId);
+    const reservation = getSeatReservation(seatId, date);
     if (reservation) {
       return users.find(u => u.id === reservation.userId);
     }
@@ -140,7 +148,7 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
   };
 
   const handleSeatClick = (seatId) => {
-    const status = getSeatStatus(seatId);
+    const status = getSeatStatus(seatId, selectedDate);
     if (status === 'occupied' || status === 'fixed') {
       setSelectedSeat(seatId);
       setShowSeatDetail(true);
@@ -148,6 +156,7 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
       setSelectedSeat(seatId);
       setErrorMessage('');
       setBookingUserId('');
+      setFormData({ date: selectedDate, startTime: '', endTime: '' });
       setShowBookingModal(true);
     }
   };
@@ -177,8 +186,8 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
     showToastMessage('预约已取消！');
   };
 
-  const getStatusColor = (seatId) => {
-    const status = getSeatStatus(seatId);
+  const getStatusColor = (seatId, date = selectedDate) => {
+    const status = getSeatStatus(seatId, date);
     switch (status) {
       case 'available':
         return 'bg-green-500 hover:bg-green-600';
@@ -314,18 +323,32 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
         <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>座位管理</h1>
 
         {rooms.length > 0 && (
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'} border ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-            <Building2 className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} />
-            <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>当前房间：</span>
-            <select
-              value={currentRoomId}
-              onChange={(e) => setCurrentRoomId(parseInt(e.target.value))}
-              className={`px-3 py-1.5 rounded-lg border ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-w-[160px]`}
-            >
-              {rooms.map(r => (
-                <option key={r.id} value={r.id}>{r.name}（{r.seatCount}座）</option>
-              ))}
-            </select>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'} border ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+              <Building2 className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} />
+              <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>当前房间：</span>
+              <select
+                value={currentRoomId}
+                onChange={(e) => setCurrentRoomId(parseInt(e.target.value))}
+                className={`px-3 py-1.5 rounded-lg border ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm min-w-[160px]`}
+              >
+                {rooms.map(r => (
+                  <option key={r.id} value={r.id}>{r.name}（{r.seatCount}座）</option>
+                ))}
+              </select>
+            </div>
+
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'} border ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+              <Calendar className={`w-4 h-4 ${isDark ? 'text-blue-400' : 'text-blue-500'}`} />
+              <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>查看日期：</span>
+              <input
+                type="date"
+                min={today}
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className={`px-3 py-1.5 rounded-lg border ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-800'} focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm`}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -342,11 +365,16 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
           <div className={`rounded-xl p-6 mb-6 ${isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'}`}>
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                  {activeRoom?.name} · 共 {seatCount} 个座位
-                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                    {activeRoom?.name} · 共 {seatCount} 个座位
+                  </h2>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${selectedDate === today ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
+                    {formatDateLabel(selectedDate)}
+                  </span>
+                </div>
                 <p className={`text-sm mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  可切换房间查看不同自习室的座位分布
+                  下方展示「{formatDateLabel(selectedDate)}」的座位占用情况，切换上方日期可提前查看 / 预约其他日期
                 </p>
               </div>
               <div className="flex gap-6">
@@ -374,15 +402,15 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
               >
               {Array.from({ length: seatCount }).map((_, index) => {
                 const seatId = index + 1;
-                const status = getSeatStatus(seatId);
-                const reservation = getSeatReservation(seatId);
+                const status = getSeatStatus(seatId, selectedDate);
+                const reservation = getSeatReservation(seatId, selectedDate);
                 const fixedUser = getFixedUserForSeat(seatId);
 
                 return (
                   <button
                     key={seatId}
                     onClick={() => handleSeatClick(seatId)}
-                    className={`w-28 h-28 rounded-lg ${getStatusColor(seatId)} flex flex-col items-center justify-center transition-all hover:scale-105 relative`}
+                    className={`w-28 h-28 rounded-lg ${getStatusColor(seatId, selectedDate)} flex flex-col items-center justify-center transition-all hover:scale-105 relative`}
                   >
                     <span className="text-white font-bold text-lg">{seatId}</span>
                     {(status === 'occupied' || status === 'fixed') && (
@@ -400,7 +428,7 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                       <div className={`absolute bottom-2 left-1/2 transform -translate-x-1/2 text-xs text-white/90 font-medium px-2 py-0.5 rounded ${
                         isDark ? 'bg-black/30' : 'bg-black/20'
                       }`}>
-                        {reservation.date === today ? '今天' : '预约中'}
+                        {'已约'}
                       </div>
                     ) : null}
                   </button>
@@ -423,9 +451,9 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
             </div>
 
             {(() => {
-              const reservation = getSeatReservation(selectedSeat);
+              const reservation = getSeatReservation(selectedSeat, selectedDate);
               const fixedUser = getFixedUserForSeat(selectedSeat);
-              const user = getSeatUserInfo(selectedSeat);
+              const user = getSeatUserInfo(selectedSeat, selectedDate);
 
               if (!reservation && !fixedUser) {
                 return (
@@ -433,7 +461,8 @@ export default function SeatManagement({ isDark, isAdmin, currentUser, reservati
                     <div className={`w-16 h-16 ${isDark ? 'bg-gray-700' : 'bg-gray-100'} rounded-full flex items-center justify-center mx-auto mb-4`}>
                       <Check className="w-8 h-8 text-green-500" />
                     </div>
-                    <p className={isDark ? 'text-gray-400' : 'text-gray-500'}>该座位当前暂无预约</p>
+                    <p className={isDark ? 'text-gray-400' : 'text-gray-500'}>该座位在 {formatDateLabel(selectedDate)} 暂无预约</p>
+                    <p className={`mt-1 text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>切换上方日期可查看其他日期的占用情况</p>
                   </div>
                 );
               }

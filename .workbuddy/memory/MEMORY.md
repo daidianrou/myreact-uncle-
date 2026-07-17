@@ -35,3 +35,4 @@
 - **人脸识别功能已于 2026-07-16 移除**（自习室电脑无摄像头）：删除 FaceVerify.jsx / FaceCapture.jsx / AdminFaceManager.jsx / src/utils/faceApi.js / public/models，并移除侧边栏"人脸管理"菜单、Header 人脸采集 UI、Login/Register 中的人脸与人脸登录分支。
 - 历史 seed 用户数据可能仍含 email / faceDescriptor 字段，仅作数据兼容，UI 已不再展示。
 - 座位状态查询为 O(n) 遍历，数据量大时需优化
+- **手机屏幕适配已于 2026-07-16 移除（用户偏好纯桌面版）**：当天曾做双设备模式(电脑/手机)、三档切换(桌面/竖屏/横屏)、BottomNav 底部导航、各页面移动端布局、Dashboard 手机卡片化。用户反馈"还是不好看"后要求回退，已 `git checkout` 还原 src/App.js / Dashboard.jsx / Header.jsx / ReservationManagement.jsx / SeatManagement.jsx / Settings.jsx / Sidebar.jsx / index.css，并删除 src/components/BottomNav.jsx。当前版本为纯桌面 SPA，请勿再引入 deviceMode/BodyNav 等手机适配逻辑，除非用户明确要求。
